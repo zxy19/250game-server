@@ -28,7 +28,7 @@ export default class {
             this.roomEvents[type] = []
             this.wss.on(type, (conId, data) => {
                 this.roomEvents[type].forEach((event) => {
-                    if (event.id == room) {
+                    if (this.conId2Grp[conId] == event.id) {
                         event.events.forEach((cb) => {
                             cb(conId, data);
                         })
@@ -96,14 +96,14 @@ export default class {
                     delete this.grpConns[this.conId2Grp[conId]];
                     delete this.gameRooms[this.conId2Grp[conId]];
                     Object.keys(this.roomEvents).forEach((type) => {
-                        this.roomEvents[type]=this.roomEvents[type].filter((event) => {
+                        this.roomEvents[type] = this.roomEvents[type].filter((event) => {
                             if (event.id == this.conId2Grp[conId]) return false;
-                            return true
+                            return true;
                         })
                     })
+                    console.log("[ROOM]销毁:" + this.conId2Grp[conId]);
                 } else {
                     this.gameRooms[this.conId2Grp[conId]].leave(conId);
-                    console.log("[ROOM]销毁:" + this.conId2Grp[conId]);
                 }
             }
             delete this.conId2Grp[conId];

@@ -107,11 +107,26 @@ const idxPutCard: Record<number, string> = {
     "-5": "Q",
     "-6": "K",
 }
-
-function _isValidPut(game: IGame, cards: ICard[], c: Record<string, number>, jokerCnt: number): { n: number, c: string | string[] }[] {
-    let targetCardId: { n: number, c: string }[] = [];
+export function hasMultiPut(cards: ICard[]): boolean {
+    let hasCard: ICard | undefined, jokerCnt = 0;
+    for (let i = 0; i < cards.length; i++) {
+        if (cards[i].id != "JOK") {
+            if (hasCard) {
+                return false;
+            }
+            hasCard = cards[i];
+        } else {
+            jokerCnt++;
+        }
+    }
+    if (!hasCard) return false;
+    if ((Math.abs(CARDS.indexOf(hasCard.id) - 6) - 1) * 2 + 1 >= jokerCnt) return false;
+    return true;
+}
+function _isValidPut(game: IGame, cards: ICard[], c: Record<string, number>, jokerCnt: number, shunziOnly?: boolean): { n: number, c: string | string[], color?: number }[] {
+    let targetCardId: { n: number, c: string | string[], color?: number }[] = [];
     //case 1:XXX
-    if (Object.keys(c).length == 1) {
+    if (Object.keys(c).length == 1 && !shunziOnly) {
         if (c[Object.keys(c)[0]] + jokerCnt >= 3) {
             targetCardId.push({ n: jokerCnt, c: Object.keys(c)[0] });
         } else {
@@ -138,27 +153,66 @@ function _isValidPut(game: IGame, cards: ICard[], c: Record<string, number>, jok
                 if (left != -1) right = i;
             } else if (c[card] > 1) {
                 throw new Error("顺子不能含有多张牌");
-            } else {
-                targetCardId.push({ n: 1, c: card });
             }
         }
+        let cnt = 0;
+        for (let i = left; i <= right; i++) {
+            if (c[CARDS[i]] == 0) {
+                cnt++;
+            }
+        }
+        if (cnt > jokerCnt) {
+            throw new Error("摆牌非法");
+        }
+        for (let i = left; i <= right; i++) {
+            if (c[CARDS[i]] == 0) {
+                targetCardId.push({ n: 1, c: CARDS[i], color: col });
+            }
+        }
+        while (jokerCnt - cnt > 0) {
+            if (6 - left < right - 6) {
+                if (left == 0) throw new Error("摆牌非法");
+                left--;
+                targetCardId.push({ n: 1, c: CARDS[left], color: col });
+            } else if (6 - left > right - 6) {
+                if (right >= CARDS.length - 2) throw new Error("摆牌非法");
+                right++;
+                targetCardId.push({ n: 1, c: CARDS[right], color: col });
+            } else if (jokerCnt - cnt == 0) {
+                let tc = [];
+                if (left != 0) tc.push(CARDS[left - 1]);
+                if (right != CARDS.length - 2) tc.push(CARDS[right + 1]);
+                if (tc.length == 0) throw new Error("摆牌非法");
+                targetCardId.push({ n: 1, c: tc, color: col });
+            } else {
+                if (left != 0) {
+                    left--;
+                    targetCardId.push({ n: 1, c: CARDS[left], color: col });
+                } else if (right != CARDS.length - 2) {
+                    right++;
+                    targetCardId.push({ n: 1, c: CARDS[right], color: col });
+                } else throw new Error("摆牌非法");
+            }
+            cnt++;
+        }
         /**
-         * 5,6,7,8,9=>7
-         * 5,6,7,8=>6.5
-         * 6,7,8,9=>7.5
+         * 5,6,7,8,9=>6
+         * 5,6,7,8=>5.5
+         * 6,7,8,9=>6.5
          */
-        if (Math.abs((left + right) / 2 - 7) >= 1) {
+        if (Math.abs((left + right) / 2 - 6) >= 1) {
             throw new Error("顺子必须以7为中心");
         }
     }
     return targetCardId;
 }
-function _isValidCha(game: IGame, cards: ICard[], c: Record<string, number>, jokerCnt: number, additCard: ICard): { n: number, c: string | string[] }[] {
+function _isValidCha(game: IGame, cards: ICard[], c: Record<string, number>, jokerCnt: number, additCard: ICard): { n: number, c: string | string[], color?: number }[] {
     let targetCardId: { n: number, c: string }[] = [];
     //case 1:XXX
     if (Object.keys(c).length == 1) {
         if (c[Object.keys(c)[0]] + jokerCnt >= 3) {
-            targetCardId.push({ n: jokerCnt, c: Object.keys(c)[0] });
+            if (jokerCnt)
+                targetCardId.push({ n: jokerCnt, c: Object.keys(c)[0] });
         } else {
             throw new Error("插牌非法");
         }
@@ -168,7 +222,7 @@ function _isValidCha(game: IGame, cards: ICard[], c: Record<string, number>, jok
     }
     return targetCardId;
 }
-function _isValidExt(game: IGame, cards: ICard[], c: Record<string, number>, jokerCnt: number, stored: IDeck): { n: number, c: string | string[] }[] {
+function _isValidExt(game: IGame, cards: ICard[], c: Record<string, number>, jokerCnt: number, stored: IDeck): { n: number, c: string | string[], color?: number }[] {
     let targetCardId: { n: number, c: string | string[] }[] = [];
     //case 1:XXX
     if (Object.keys(c).length == 1) {
@@ -180,11 +234,11 @@ function _isValidExt(game: IGame, cards: ICard[], c: Record<string, number>, jok
                     if (card.real) id = card.real.id;
                     else return;
                 }
-                if(id == Object.keys(c)[0]) cnt++;
+                if (id == Object.keys(c)[0]) cnt++;
             });
             if (cnt >= 3) {
-                if(jokerCnt)targetCardId.push({ n: jokerCnt, c: Object.keys(c)[0] });
-            }else{
+                if (jokerCnt) targetCardId.push({ n: jokerCnt, c: Object.keys(c)[0] });
+            } else {
                 throw new Error("补牌非法");
             }
         } else {
@@ -208,12 +262,15 @@ function _isValidExt(game: IGame, cards: ICard[], c: Record<string, number>, jok
                 useableCards.push(key);
             }
         })
-        targetCardId.push({ n: jokerCnt, c: useableCards });
+        if (jokerCnt)
+            targetCardId.push({ n: jokerCnt, c: useableCards });
     }
     return targetCardId;
 }
+
+
 //检查摆牌/插牌合法。返回需要钉的牌的选项
-export function isValidPutCard(game: IGame, cards: ICard[], putedCard?: IDeck, additCard?: ICard): { select: ICard[], count: number }[] {
+export function isValidPutCard(game: IGame, cards: ICard[], putedCard?: IDeck, additCard?: ICard, shunzi?: boolean): { select: ICard[], count: number }[] {
     let c: Record<string, number> = {};
     let jokerCnt = 0;
     cards.forEach((card) => {
@@ -231,138 +288,177 @@ export function isValidPutCard(game: IGame, cards: ICard[], putedCard?: IDeck, a
         else
             throw new Error("王牌不可插");
     }
-    let targetCardId: { n: number, c: string }[] = [];
-    if (Object.keys(c).length == 0) {
-        if (putedCard) {
-            //传入了摆牌区的情况，且选中了若干王牌
-            let cd: Record<string, number> = {};
-            putedCard.cards.forEach((card) => {
-                cd[card.id] = (cd[card.id] || 0) + 1;
-            })
-            Object.keys(cd).forEach((key) => {
-                for (let i = 0; i < 4; i++) {
-
-                }
-            })
-        } else
-            throw new Error("摆牌非法");
-    } else if (Object.keys(c).length == 1) {
-        if (c[Object.keys(c)[0]] + jokerCnt >= 3) {
-            targetCardId.push({ n: jokerCnt, c: idxPutCard[Object.keys(c)[0]] });
-        } else {
-            if (additCard) {
-                throw new Error("摆牌非法");
-            }
-            //传入了摆牌区的情况：检查是否可以补张
-            let dumpCnt = 0;
-            if (putedCard)
-                putedCard.cards.forEach((card) => {
-                    if (card.id == idxPutCard[Object.keys(c)[0]]) {
-                        dumpCnt++;
-                    }
-                })
-            if (dumpCnt > 2) {
-                targetCardId = []
-            } else
-                throw new Error("摆牌非法");
-        }
+    let targetCardId: { n: number, c: string | string[], color?: number }[] = [];
+    if (additCard) {
+        targetCardId = _isValidCha(game, cards, c, jokerCnt, additCard);
+    } else if (cards.length <= 2 && putedCard) {
+        targetCardId = _isValidExt(game, cards, c, jokerCnt, putedCard);
     } else {
-        if (additCard) {
-            throw new Error("顺子不可插");
-        }
-        let col = -1
-        for (let i = 0; i < cards.length; i++) {
-            if (cards[i].id == "JOK") {
-                continue;
-            }
-            if (!["5", "6", "7", "8", "9"].find(id => id == cards[i].id)) {
-                throw new Error("摆牌非法");
-            }
-            if (c[putCardIdx[cards[i].id]] > 1) {
-                throw new Error("摆牌非法");
-            }
-            if (col == -1) {
-                col = cards[i].color;
-            } else if (col != cards[i].color) {
-                throw new Error("摆牌非法");
-            }
-        }
-
-        if (c["6"] || c["8"]) {
-            if (!c["6"]) {
-                targetCardId.push({ n: 1, c: "6" });
-            } else if (!c["8"]) {
-                targetCardId.push({ n: 1, c: "8" });
-            }
-        }
-        if (c["5"] || c["9"]) {
-            if (!c["5"]) {
-                targetCardId.push({ n: 1, c: "5" });
-            } else if (!c["9"]) {
-                targetCardId.push({ n: 1, c: "9" });
-            }
-        }
+        targetCardId = _isValidPut(game, cards, c, jokerCnt, shunzi);
     }
-
     let hasPinColor = -1, hasPinId = "";
     let ret: { select: ICard[], count: number }[] = [];
-    if (targetCardId.length > 2) {
-        throw new Error("摆牌非法");
-    }
-    targetCardId.forEach(({ c: cardId, n: num }) => {
-        if (jokerCnt > 0) {
-            jokerCnt -= 1;
-            let selectColor = [true, true, true, true];
-            game.allShown.cards.forEach((card) => {
-                if (card.id == cardId) {
-                    selectColor[card.color] = false;
-                }
-            });
-            if (hasPinId == cardId) {
-                selectColor[hasPinColor] = false;
-            }
-            cards.forEach((card) => {
-                if (card.id == cardId) {
-                    selectColor[card.color] = false;
-                }
-            });
-            game.pinnedCard.forEach((card) => {
-                if (card.id == cardId) {
-                    selectColor[card.color] = false;
-                }
-            });
-            let trueCnt = 0;
-            selectColor.forEach((flg, idx) => {
-                if (flg) {
-                    trueCnt += 1;
-                }
-            })
-            if (trueCnt < num) {
-                throw new Error("摆牌非法");
+    targetCardId.forEach((targetCard) => {
+        let _cardId = targetCard.c;
+        let num = targetCard.n;
+        let col = targetCard.color;
+        if (jokerCnt >= num) {
+            jokerCnt -= num;
+            if (typeof _cardId === "string") {
+                _cardId = [_cardId];
             }
             let tmp: { select: ICard[], count: number } = {
                 select: [],
                 count: num
             };
-            selectColor.forEach((flg, idx) => {
-                if (flg) {
-                    tmp.select.push({
-                        id: cardId,
-                        color: idx
-                    })
+            _cardId.forEach((cardId) => {
+                let selectColor = [true, true, true, true];
+                if (col !== undefined) {
+                    for (let i = 0; i < 4; i++) {
+                        selectColor[i] = (i == col);
+                    }
                 }
+                game.allShown.cards.forEach((card) => {
+                    if (cardId == card.id) {
+                        selectColor[card.color] = false;
+                    }
+                });
+                if (hasPinId == cardId) {
+                    selectColor[hasPinColor] = false;
+                }
+                cards.forEach((card) => {
+                    if (card.id == cardId) {
+                        selectColor[card.color] = false;
+                    }
+                });
+                game.pinnedCard.forEach((card) => {
+                    if (card.id == cardId) {
+                        selectColor[card.color] = false;
+                    }
+                });
+                let trueCnt = 0;
+                selectColor.forEach((flg, idx) => {
+                    if (flg) {
+                        trueCnt += 1;
+                    }
+                })
+                if (trueCnt < num) {
+                    throw new Error("摆牌非法");
+                }
+                selectColor.forEach((flg, idx) => {
+                    if (flg) {
+                        tmp.select.push({
+                            id: cardId,
+                            color: idx
+                        })
+                    }
+                })
             })
             ret.push(tmp);
+        } else {
+            throw new Error("摆牌非法");
         }
     })
     return ret;
 }
-export function putCard(game: IGame, cards: ICard[], putedCard: IDeck, additCard?: ICard) {
-    let pics = isValidPutCard(game, cards, putedCard, additCard);
+export function putCard(game: IGame, cards: ICard[], pinCard: ICard[], additCard?: ICard) {
     pickCardOrFail(game.players[game.stage.playerIndex].hand!, cards);
-    addCards(game.players[game.stage.playerIndex].stored!, cards);
+    let pickId = 0;
     addCards(game.allShown, cards);
-    return pics;
+
+    cards.forEach((card) => {
+        if (pickId >= pinCard.length) return;
+        if (card.id == "JOK") {
+            card.real = pinCard[pickId];
+            pickId++;
+        }
+    });
+    if (additCard) {
+        cards.push({
+            id: "JOK",
+            color: 2,
+            real: additCard
+        });
+    }
+    addCards(game.players[game.stage.playerIndex].stored!, cards);
+}
+export function canPutCard(game: IGame, deck: IDeck, storedCards?: IDeck, additCard?: ICard) {
+    //注：由于中途发现忘记做的功能导致代码极为丑陋，后续修缮。
+    let c: Record<number, Record<string, number>> = {}
+    let c2: Record<string, number> = {}
+    if (storedCards)
+        storedCards.cards.forEach((card) => {
+            c2[card.id] = (c2[card.id] || 0) + 1;
+        });
+
+    deck.cards.forEach((card) => {
+        if (isCardPinned(game, card)) {
+            return;
+        }
+        c[card.color] = (c[card.color] || {});
+        c[card.color][card.id] = (c[card.color][card.id] || 0) + 1;
+    });
+    for (let card of deck.cards) {
+        if (isCardPinned(game, card)) {
+            continue;
+        }
+        if (c2[card.id] && c2[card.id] > 3) {
+            console.log("补牌可能性", card);
+            return true;
+        }
+    }
+    let maxCnt = 0;
+    let jokerCnt = 0;
+    for (let i = 0; i < 4; i++) {
+        if (c[i] && c[i]["JOK"]) {
+            jokerCnt++;
+        }
+    }
+    if (additCard) {
+        if (additCard.id != "JOK") {
+            c[additCard.color] = (c[additCard.color] || {})
+            c[additCard.color][additCard.id] = (c[additCard.color][additCard.id] || 0) + 1;
+        }
+    }
+    CARDS.forEach((card) => {
+        let tmp = 0;
+        if (card != "JOK") {
+            if (additCard && card != additCard.id) return;
+            for (let i = 0; i < 4; i++) {
+                if (c[i] && c[i][card]) {
+                    tmp++;
+                }
+            }
+            maxCnt = Math.max(maxCnt, tmp);
+        }
+    });
+    if (additCard) {
+        if (additCard.id != "JOK") {
+            c[additCard.color][additCard.id] = (c[additCard.color][additCard.id] || 0) - 1;
+        }
+    }
+    if (maxCnt + jokerCnt >= 3) { console.log("摆牌可能性", maxCnt); return true; }
+    else {
+        if (additCard) return false;
+        let tmp = 0;
+        for (let i = 0; i < 4; i++) {
+            if (c[i] && c[i]["7"]) {
+                tmp++;
+            } else continue;
+            if (jokerCnt >= 2) return true;
+            if (c[i] && c[i]["8"] && c[i]["6"]) {
+                if (c[i]["8"]) tmp++;
+                if (c[i]["6"]) tmp++;
+            }
+            if (jokerCnt + tmp >= 3) return true;
+            if (c[i] && c[i]["9"] && c[i]["5"]) {
+                if (c[i]["9"]) tmp++;
+                if (c[i]["5"]) tmp++;
+            }
+            if (jokerCnt + tmp >= 5) return true;
+        }
+    }
+    return false;
 }
 
 export function calcScore(game: IGame, player: IPlayer, can20?: boolean): number {
@@ -434,7 +530,7 @@ export function endGame(game: IGame) {
     let maxScore = 0, maxScoreIdx = 0;
     game.players.forEach((player, idx) => {
         player.hand = createDeck("", []);
-        player.stored = createDeck("", []);
+        player.stored = createDeck("", [], true);
         player.mark = {};
         game.stage.playerIndex = idx;
         for (let j = 0; j < 5; j++) {

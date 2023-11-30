@@ -19,6 +19,7 @@ export interface IPlayer {
     stored?: IDeck,
     ready?: boolean,
     mark: Record<string, number>
+    profile: Record<string, string>
 }
 export enum GAME_OPERATES {
     ROUND_START = 1,

@@ -26,6 +26,7 @@ export function createPlayer():IPlayer{
         score: 0,
         mark: {},
         internalId:0,
-        hand:createDeck("手牌",[])
+        hand:createDeck("手牌",[]),
+        profile: {},
     }
 }

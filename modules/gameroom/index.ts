@@ -1,6 +1,6 @@
 import { addCards, toCleanCard } from "./util/card";
 import { GAME_OPERATES, ICard, IGame, IPlayer } from "../../interfaces/game";
-import { applyCalc, discardCard, drawCard, endGame, initGame, isValidPutCard, nxtPlayer, putCard } from "../../modules/gameroom/util/game";
+import { applyCalc, discardCard, drawCard, endGame, initGame, isValidPutCard, nxtPlayer, putCard, hasMultiPut } from "../../modules/gameroom/util/game";
 type roomMgrOps = {
     send(group: string, data: Record<string, any> | String, exceptConId?: number): void;
     sendPlayer(conId: number, data: Record<string, any> | String): void;
@@ -13,7 +13,7 @@ export default class Room {
     roomMgr: roomMgrOps
     data: {
         toPutCard: ICard[],
-        toPutPics: { select: ICard[], count: number }[],
+        toPutPics: { select: ICard[], count: number, optGrp?: number, title?: string }[],
         toPutPinnedCard: ICard[],
         toPutAdd?: ICard,
         confirmedCha: {
@@ -28,7 +28,7 @@ export default class Room {
             player: number,
             do: boolean
         }[],
-        autoManaged: number[]
+        autoManaged: number[],
     } = {
             toPutCard: [],
             toPutPics: [],
@@ -37,7 +37,7 @@ export default class Room {
             confirmedAntiCalc: [],
             calcFrom: 0,
             calcPutCard: false,
-            autoManaged: []
+            autoManaged: [],
         }
     constructor(id: string, roomMgrDatas: roomMgrOps) {
         this.id = id;
@@ -45,6 +45,7 @@ export default class Room {
         this.roomMgr = roomMgrDatas;
         this.game = undefined;
         this.on("ready", this.onReady.bind(this));
+        this.on("setProfile", this.onSetProfile.bind(this));
         this.on("putCard", this.onPutCard.bind(this));
         this.on("putCardSelect", this.onPutCardSelect.bind(this));
         this.on("cha", this.onCha.bind(this));
@@ -62,6 +63,7 @@ export default class Room {
                         this.game.players[i].ready = true;
                         this.game.players[i].internalId = conId;
                         this.data.autoManaged.splice(this.data.autoManaged.indexOf(element.internalId), 1);
+                        this.sendPlayer(conId, { type: "hello" })
                         this.sendPlayer(conId, {
                             type: "start",
                             id: conId,
@@ -74,16 +76,18 @@ export default class Room {
             return false;
         }
         if (this.player.find((p) => p.id == uid)) return false;
-        let curp: IPlayer = { id: uid, internalId: conId, name: name, score: 0, mark: {} };
+        let curp: IPlayer = { id: uid, internalId: conId, name: name, score: 0, mark: {}, profile: {} };
         this.player.push(curp);
         this.player.forEach((p) => {
             p.ready = false;
         });
         //等待玩家加入被房间管理系统确认后才能发送同步信息
         setTimeout(() => {
+            this.sendPlayer(conId, { type: "hello" })
             this.send({
                 type: "join",
                 id: conId,
+                playerId: uid,
                 player: this.player
             });
         }, 0)
@@ -92,15 +96,32 @@ export default class Room {
     leave(conId: number) {
         let curp = this.player.find((p) => p.internalId == conId);
         if (curp) {
-            this.player = this.player.filter((p) => p.internalId != conId);
             if (this.game) {
                 this.data.autoManaged.push(curp.internalId);
                 this.onCheckAutoManaged(curp.internalId);
-            }
+            } else
+                this.player = this.player.filter((p) => p.internalId != conId);
             this.send({
                 type: "leave",
                 player: this.player,
                 id: conId,
+                game: this.game
+            })
+        }
+    }
+    onSetProfile(conId: number, data: Record<string, any>) {
+        let curp = this.player.find((p) => p.internalId == conId);
+        if (curp) {
+            if (this.game) {
+                let p = this.game.players.find((p) => p.internalId == conId)
+                if (p) p.profile = data.profile;
+            }
+            curp.profile = data.profile;
+            this.send({
+                type: "setProfile",
+                id: conId,
+                profile: data.profile,
+                player: this.player,
                 game: this.game
             })
         }
@@ -221,8 +242,24 @@ export default class Room {
         if (!this.game) return;
         if (!this.isPlayer(conId)) return;
         try {
+            if (!data.putMethod) {
+                if (hasMultiPut(data.cards)) {
+                    this.sendPlayer(conId, {
+                        type: "optSelect",
+                        game: this.game,
+                        player: this.game.stage.playerIndex,
+                        orgData: data,
+                        key: "putMethod",
+                        selections: [
+                            { title: "选择摆顺子", value: 1 },
+                            { title: "选择摆对", value: 2 },
+                        ]
+                    });
+                    return;
+                }
+            }
             data.cards = data.cards.map(toCleanCard);
-            this.data.toPutPics = isValidPutCard(this.game, data.cards, this.game.players[this.game.stage.playerIndex].stored);
+            this.data.toPutPics = isValidPutCard(this.game, data.cards, this.game.players[this.game.stage.playerIndex].stored, undefined, data.putMethod === 1);
             this.data.toPutCard = data.cards;
             this.data.toPutAdd = undefined;
             this.data.toPutPinnedCard = [];
@@ -270,6 +307,10 @@ export default class Room {
             if (this.data.toPutPics.length == 0) {
                 this.onPutCardDone(conId);
             } else {
+                if (this.data.toPutPics[0].count == 0) {
+                    this.data.toPutPics.shift();
+                    continue;
+                }
                 if (this.data.toPutPics[0].select.length == 1) {
                     let cardGrp1: { select: ICard[], count: number } = this.data.toPutPics.shift();
                     this.data.toPutPinnedCard.push(cardGrp1.select[0])
@@ -287,7 +328,7 @@ export default class Room {
         }
     }
     onPutCardDone(conId: number) {
-        putCard(this.game, this.data.toPutCard, this.game.players[this.game.stage.playerIndex].stored, this.data.toPutAdd);
+        putCard(this.game, this.data.toPutCard, this.data.toPutPinnedCard, this.data.toPutAdd);
         this.data.toPutPinnedCard.forEach((card) => {
             this.game.pinnedCard.push(card);
         });
@@ -309,11 +350,6 @@ export default class Room {
             return;
         }
         let card = drawCard(this.game);
-        // //DEBUG
-        // for (let i = 0; i < 4; i++) {
-        //     if (i != card.color)
-        //         addCards(this.game.players[this.game.stage.playerIndex].hand, [{ id: card.id, color: i }])
-        // }
         this.game.stage.operate = GAME_OPERATES.DISCARD;
         this.send({
             type: "drawCard",
@@ -409,8 +445,23 @@ export default class Room {
             player: this.game.stage.playerIndex,
             res: calcRes
         })
+        this.onCheckAutoManaged();
     }
     onNextRound() {
+        for (let p of this.game.players) {
+            if (p.score > 250) {
+                this.player = this.game.players;
+                for (let p of this.player) {
+                    p.ready = false;
+                }
+                this.send({
+                    type: "gameOver",
+                    game: this.game,
+                })
+                this.game = undefined;
+                return;
+            }
+        }
         endGame(this.game);
         this.data.confirmedAntiCalc = [];
         this.game.stage.operate = GAME_OPERATES.DISCARD;
