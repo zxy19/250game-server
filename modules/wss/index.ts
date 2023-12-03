@@ -41,12 +41,15 @@ export default class WSS {
     wsMsg(data: string, conId: number) {
         try {
             var dat = JSON.parse(data);
+            if (dat.type == "ping") {
+                this.send(conId, { type: "pong", tick: dat.tick });
+                return;
+            }
         } catch (e) {
             return;
         }
         this.emitEvent(dat.type, conId, dat);
     }
-
     on(type: string, cb: (from: number, data: Record<string, any>) => void) {
         if (!this.events[type]) this.events[type] = [];
         this.events[type].push(cb);
@@ -61,6 +64,8 @@ export default class WSS {
         }
         this.connections[conId].send(toSendData);
     }
-
-
+    close(conId: number) {
+        if (!this.connections[conId]) return;
+        this.connections[conId].close();
+    }
 }    

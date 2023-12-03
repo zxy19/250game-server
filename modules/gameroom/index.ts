@@ -1,10 +1,12 @@
 import { addCards, toCleanCard } from "./util/card";
 import { GAME_OPERATES, ICard, IGame, IPlayer } from "../../interfaces/game";
 import { applyCalc, discardCard, drawCard, endGame, initGame, isValidPutCard, nxtPlayer, putCard, hasMultiPut } from "../../modules/gameroom/util/game";
+import { CARD_SCORE } from "../../config/cards";
 type roomMgrOps = {
     send(group: string, data: Record<string, any> | String, exceptConId?: number): void;
     sendPlayer(conId: number, data: Record<string, any> | String): void;
     on(type: string, room: string, cb: (from: number, data: Record<string, any>) => void): void;
+    closePlayer(conId: number): void;
 }
 export default class Room {
     game?: IGame
@@ -39,6 +41,10 @@ export default class Room {
             calcPutCard: false,
             autoManaged: [],
         }
+    pingDataTimeDown = 0;
+    pingTick = 0;
+    hasPongPlayer: Record<number, number> = {};
+    playerTimeout: Record<number, number> = {};
     constructor(id: string, roomMgrDatas: roomMgrOps) {
         this.id = id;
         this.player = [];
@@ -53,6 +59,8 @@ export default class Room {
         this.on("draw", this.onDrawCard.bind(this));
         this.on("calc", this.onCalc.bind(this));
         this.on("antiCalc", this.onAntiCalc.bind(this));
+        this.on("msg", this.onMessage.bind(this));
+        this.on("pong", this.onPong.bind(this));
     }
     join(uid: string, conId: number, name: string) {
         if (this.game) {
@@ -62,8 +70,9 @@ export default class Room {
                     if (this.data.autoManaged.includes(element.internalId)) {
                         this.game.players[i].ready = true;
                         this.game.players[i].internalId = conId;
+                        this.game.players[i].offline = false;
                         this.data.autoManaged.splice(this.data.autoManaged.indexOf(element.internalId), 1);
-                        this.sendPlayer(conId, { type: "hello" })
+                        this.sendPlayer(conId, { type: "hello", hasGame: true })
                         this.sendPlayer(conId, {
                             type: "start",
                             id: conId,
@@ -98,6 +107,7 @@ export default class Room {
         if (curp) {
             if (this.game) {
                 this.data.autoManaged.push(curp.internalId);
+                this.game.players.find((p) => p.internalId == conId).offline = true;
                 this.onCheckAutoManaged(curp.internalId);
             } else
                 this.player = this.player.filter((p) => p.internalId != conId);
@@ -128,35 +138,90 @@ export default class Room {
     }
     //全局时间刻(一般为1s)
     tick() {
-
+        if (this.pingDataTimeDown > 0) this.pingDataTimeDown--;
+        else this.pingDataTimeDown = 7
+            ;
+        if (this.pingDataTimeDown == 0) {
+            let playerDelay: number[] = [];
+            (this.game ? this.game.players : this.player).forEach((p) => {
+                if (this.hasPongPlayer[p.internalId] == undefined)
+                    this.hasPongPlayer[p.internalId] = 2000;
+                p.delay = this.hasPongPlayer[p.internalId];
+                if (p.delay == 2000 && p.offline != true) {
+                    this.playerTimeout[p.internalId] = (this.playerTimeout[p.internalId] || 0) + 1;
+                    if (this.playerTimeout[p.internalId] >= 2) {
+                        p.offline = true;
+                        this.roomMgr.closePlayer(p.internalId);
+                    }
+                } else {
+                    this.playerTimeout[p.internalId] = 0;
+                }
+                playerDelay.push(p.delay);
+            })
+            this.send({
+                type: "pingResult",
+                ping: playerDelay,
+            })
+        } else if (this.pingDataTimeDown == 2) {
+            this.pingTick = Date.now();
+            if (this.game)
+                this.hasPongPlayer = this.game.players.map(p => -1);
+            else
+                this.hasPongPlayer = this.player.map(p => -1);
+            this.send({
+                type: "ping"
+            })
+        }
     }
-    send(msg: string | Object) {
-        this.roomMgr.send(this.id, msg);
+    send(msg: string | Object, unmasked = false) {
+        if (unmasked) {
+            this.roomMgr.send(this.id, msg);
+        } else {
+            this.maskedSend(msg);
+        }
     }
     sendPlayer(conId: number, msg: string | Object) {
         this.roomMgr.sendPlayer(conId, msg);
     }
+    maskedSend(msg: any) {
+        if (msg.game && msg.game.players) {
+            this.game.players.forEach((p: IPlayer) => {
+                let tmpMsg = JSON.parse(JSON.stringify(msg));
+                tmpMsg.game.players = tmpMsg.game.players.map((pt: IPlayer) => {
+                    if (p.internalId != pt.internalId) {
+                        pt.hand.cards = pt.hand.cards.map((): ICard => ({ id: "JOK", color: 2 }))
+                    }
+                    return pt;
+                })
+                this.sendPlayer(p.internalId, tmpMsg);
+            })
+        } else {
+            this.roomMgr.send(this.id, msg);
+        }
+    }
     on(type: string, cb: (conId: number, data: any) => void) {
         this.roomMgr.on(type, this.id, cb);
     }
-
     isPlayer(conId: number) {
         return this.game.players[this.game.stage.playerIndex].internalId == conId;
     }
-
     onStart() {
         this.game = initGame(this.player);
+        this.send({
+            type:"firstCard",
+            card: this.game.stage.data.firstCard
+        })
         this.send({
             type: "start",
             game: this.game,
         });
     }
 
-
     /**插牌 */
     onCha(conId: number, data: Record<string, any>) {
         if (this.isPlayer(conId)) return;
         if (!this.game) return;
+        if (this.game.stage.operate != GAME_OPERATES.WAIT_CHA) return;
         if (this.data.confirmedCha.find((data) => data.player == conId)) {
             return;
         }
@@ -345,6 +410,7 @@ export default class Room {
     onDrawCard(conId: number, data: Record<string, any>) {
         if (!this.game) return;
         if (!this.isPlayer(conId)) return;
+        if (this.game.stage.operate != GAME_OPERATES.PUTCARD && this.game.stage.operate != GAME_OPERATES.AFTER_CHA) return;
         if (this.game.allCards.cards.length == 0) {
             this.onNoCard();
             return;
@@ -368,12 +434,13 @@ export default class Room {
             game: this.game,
             player: -1,
             res: this.game.players.map(_ => 0)
-        })
+        }, true);
     }
 
     onDiscardCard(conId: number, data: Record<string, any>) {
         if (!this.game) return;
         if (!this.isPlayer(conId)) return;
+        if (this.game.stage.operate != GAME_OPERATES.DISCARD) return;
         try {
             data.card = toCleanCard(data.card);
             discardCard(this.game, data.card);
@@ -415,6 +482,8 @@ export default class Room {
     }
     onAntiCalc(conId: number, data: Record<string, any>) {
         if (this.isPlayer(conId)) return;
+        if (!this.game) return;
+        if (this.game.stage.operate != GAME_OPERATES.CALC) return;
         if (this.data.confirmedAntiCalc.find((data) => data.player == conId)) {
             return;
         }
@@ -438,13 +507,14 @@ export default class Room {
         this.game.stage.operate = GAME_OPERATES.SCORE;
         this.game.players.forEach((p) => {
             p.ready = false;
-        })
+        });
         this.send({
             type: "calcDone",
             game: this.game,
-            player: this.game.stage.playerIndex,
+            player: this.data.calcFrom,
+            antiCalc: antiCalcInternalId,
             res: calcRes
-        })
+        }, true);
         this.onCheckAutoManaged();
     }
     onNextRound() {
@@ -454,15 +524,21 @@ export default class Room {
                 for (let p of this.player) {
                     p.ready = false;
                 }
+                this.player = this.player.filter((p) => this.data.autoManaged.indexOf(p.internalId) == -1);
+                this.data.autoManaged = [];
                 this.send({
                     type: "gameOver",
                     game: this.game,
-                })
+                }, true)
                 this.game = undefined;
                 return;
             }
         }
         endGame(this.game);
+        this.send({
+            type:"firstCard",
+            card: this.game.stage.data.firstCard
+        })
         this.data.confirmedAntiCalc = [];
         this.game.stage.operate = GAME_OPERATES.DISCARD;
 
@@ -475,11 +551,14 @@ export default class Room {
     }
     onReady(conId: number, data: Record<string, any>) {
         if (this.game) {
+            let player = this.game.players.find((p) => p.internalId == conId);
+            if (!player) return;
+            if (player.ready == !!(data.ready)) return;
             this.game.players.find((p) => p.internalId == conId).ready = !!(data.ready);
             this.send({
                 type: "ready",
                 game: this.game,
-            })
+            }, true)
             if (this.game.players.every((p) => p.ready)) {
                 this.onNextRound();
             }
@@ -496,7 +575,6 @@ export default class Room {
         }
 
     }
-
     onCheckAutoManaged(conId?: number, ignChk?: boolean) {
         if (!this.game) return;
         if (!conId) return this.data.autoManaged.forEach(d => this.onCheckAutoManaged(d, true));
@@ -507,7 +585,14 @@ export default class Room {
             let p = this.game.players.find((p) => p.internalId == conId);
             if (this.game.stage.operate == GAME_OPERATES.PUTCARD) this.onDrawCard(conId, {});
             else if (this.game.stage.operate == GAME_OPERATES.DISCARD) {
-                this.onDiscardCard(conId, { card: p.hand!.cards[p.hand!.cards.length - 1] });
+                let maxScore = 0, maxIndex = 0;
+                for (let i = 0; i < p.hand!.cards.length - 1; i++) {
+                    if (CARD_SCORE[p.hand!.cards[i].id] > maxScore) {
+                        maxScore = CARD_SCORE[p.hand!.cards[i].id];
+                        maxIndex = i;
+                    }
+                }
+                this.onDiscardCard(conId, { card: p.hand!.cards[maxIndex] });
             }
         } else {
             if (this.game.stage.operate == GAME_OPERATES.WAIT_CHA) {
@@ -522,5 +607,16 @@ export default class Room {
                 this.onReady(conId, { ready: true });
             }
         }
+    }
+    onMessage(conId: number, data: Record<string, any>) {
+        this.send({
+            type: "msg",
+            from: data.from,
+            msg: data.msg
+        }, true);
+    }
+    onPong(conId: number, data: Record<string, any>) {
+        let delay = Date.now() - this.pingTick;
+        this.hasPongPlayer[conId] = delay;
     }
 }

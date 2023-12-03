@@ -47,7 +47,7 @@ export function initGame(players: IPlayer[]): IGame {
         }
     }
     ret.stage.playerIndex = 0;
-    drawCard(ret);
+    ret.stage.data.firstCard = drawCard(ret);
     ret.stage.operate = GAME_OPERATES.DISCARD;
     return ret;
 }
@@ -67,8 +67,10 @@ export function nxtPlayer(game: IGame) {
 export function discardCard(game: IGame, card: ICard) {
     pickCardOrFail(game.players[game.stage.playerIndex].hand!, [card]);
     game.lastDiscard = card;
-    addCards(game.lastOperatedCards, [card]);
     addCards(game.allShown, [card]);
+
+    card.from = game.stage.playerIndex;
+    addCards(game.lastOperatedCards, [card]);
 }
 
 export function drawCard(game: IGame): ICard {
@@ -157,7 +159,7 @@ function _isValidPut(game: IGame, cards: ICard[], c: Record<string, number>, jok
         }
         let cnt = 0;
         for (let i = left; i <= right; i++) {
-            if (c[CARDS[i]] == 0) {
+            if ((c[CARDS[i]] ?? 0) == 0) {
                 cnt++;
             }
         }
@@ -165,7 +167,7 @@ function _isValidPut(game: IGame, cards: ICard[], c: Record<string, number>, jok
             throw new Error("摆牌非法");
         }
         for (let i = left; i <= right; i++) {
-            if (c[CARDS[i]] == 0) {
+            if ((c[CARDS[i]] ?? 0) == 0) {
                 targetCardId.push({ n: 1, c: CARDS[i], color: col });
             }
         }
@@ -226,23 +228,16 @@ function _isValidExt(game: IGame, cards: ICard[], c: Record<string, number>, jok
     let targetCardId: { n: number, c: string | string[] }[] = [];
     //case 1:XXX
     if (Object.keys(c).length == 1) {
-        if (c[Object.keys(c)[0]] + jokerCnt >= 3) {
-            let cnt = 0;
-            stored.cards.forEach((card) => {
-                let id = card.id;
-                if (id == "JOK") {
-                    if (card.real) id = card.real.id;
-                    else return;
-                }
-                if (id == Object.keys(c)[0]) cnt++;
-            });
-            if (cnt >= 3) {
-                if (jokerCnt) targetCardId.push({ n: jokerCnt, c: Object.keys(c)[0] });
-            } else {
-                throw new Error("补牌非法");
-            }
+        let cnt = 0;
+        stored.cards.forEach((card) => {
+            let id = card.id;
+            if (card.real) id = card.real.id;
+            if (id == Object.keys(c)[0]) cnt++;
+        });
+        if (cnt >= 3) {
+            if (jokerCnt) targetCardId.push({ n: jokerCnt, c: Object.keys(c)[0] });
         } else {
-            throw new Error("插牌非法");
+            throw new Error("补牌非法");
         }
     }
     else if (Object.keys(c).length == 0) {
@@ -283,7 +278,9 @@ export function isValidPutCard(game: IGame, cards: ICard[], putedCard?: IDeck, a
         }
     })
     if (additCard) {
-        if (additCard.id != "JOK")
+        if (isCardPinned(game, additCard)) {
+            throw new Error("不能插被钉的牌");
+        } else if (additCard.id != "JOK")
             c[additCard.id] = (c[additCard.id] || 0) + 1;
         else
             throw new Error("王牌不可插");
@@ -365,7 +362,9 @@ export function putCard(game: IGame, cards: ICard[], pinCard: ICard[], additCard
     pickCardOrFail(game.players[game.stage.playerIndex].hand!, cards);
     let pickId = 0;
     addCards(game.allShown, cards);
-
+    if (additCard) {
+        game.lastOperatedCards.cards[game.lastOperatedCards.cards.length - 1].real = { id: "JOK", color: 2 };
+    }
     cards.forEach((card) => {
         if (pickId >= pinCard.length) return;
         if (card.id == "JOK") {
@@ -542,7 +541,7 @@ export function endGame(game: IGame) {
         }
     });
     game.stage.playerIndex = maxScoreIdx;
-    drawCard(game);
+    game.stage.data.firstCard = drawCard(game);
     game.stage.operate = GAME_OPERATES.DISCARD;
     game.stage.round = 0;
 }

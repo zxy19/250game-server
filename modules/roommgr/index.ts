@@ -22,6 +22,8 @@ export default class {
         wss.on("reg", this.onReg.bind(this))
         wss.on("leave", this.onLeave.bind(this))
         wss.on("close", this.onLeave.bind(this))
+
+        setInterval(this.tick.bind(this), 1000);
     }
     on(type: string, room: string, cb: (from: number, data: Record<string, any>) => void) {
         if (!this.hasRegedEvent[type]) {
@@ -53,7 +55,8 @@ export default class {
             this.gameRooms[dat.group] = new Room(dat.group, {
                 on: this.on.bind(this),
                 send: this.send.bind(this),
-                sendPlayer: this.sendPlayer.bind(this)
+                sendPlayer: this.sendPlayer.bind(this),
+                closePlayer: this.closePlayer.bind(this),
             });
             console.log("[ROOM]创建:" + dat.group);
             this.grpConns[dat.group] = [];
@@ -84,7 +87,9 @@ export default class {
     sendPlayer(conId: number, data: Record<string, any> | String) {
         this.wss.send(conId, data);
     }
-
+    closePlayer(conId: number) {
+        this.wss.close(conId);
+    }
 
     onLeave(conId: number, data: Record<string, any>) {
         if (this.conId2Grp[conId]) {
@@ -108,6 +113,12 @@ export default class {
             }
             delete this.conId2Grp[conId];
             delete this.conId2Meta[conId];
+        }
+    }
+
+    tick() {
+        for (let room in this.gameRooms) {
+            this.gameRooms[room].tick();
         }
     }
 }
