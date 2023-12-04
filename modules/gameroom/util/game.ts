@@ -5,7 +5,7 @@
 import { CARDS, CARD_SCORE } from "../../../config/cards";
 import { GAME_OPERATES, IDeck, type ICard, type IGame, type IPlayer } from "../../../interfaces/game";
 import { addCards, createDeck, getDeckAllCards, pickCardOrFail, pickRandom } from "../../../modules/gameroom/util/card";
-
+import { createHash } from "crypto"
 export function getConfig(game: IGame, key: string, defaultValue: any) {
     return game.config[key] ?? defaultValue
 }
@@ -15,7 +15,6 @@ export function getConfig(game: IGame, key: string, defaultValue: any) {
  * @returns 游戏对象
  */
 export function initGame(players: IPlayer[]): IGame {
-
     for (let i = 0; i < players.length; i++) {
         players[i].score = 0
         players[i].hand = createDeck("", [])
@@ -32,7 +31,7 @@ export function initGame(players: IPlayer[]): IGame {
         },
         pinnedCard: [],
         players,
-        allCards: createDeck("", getDeckAllCards()),
+        allCards: createDeck("", getDeckAllCards(true)),
         lastOperate: "",
         lastOperatedCards: createDeck("弃牌堆", [], true),
         allShown: createDeck("", []),
@@ -40,15 +39,7 @@ export function initGame(players: IPlayer[]): IGame {
 
         }
     }
-    for (let i = 0; i < players.length; i++) {
-        ret.stage.playerIndex = i;
-        for (let j = 0; j < 5; j++) {
-            drawCard(ret);
-        }
-    }
-    ret.stage.playerIndex = 0;
-    ret.stage.data.firstCard = drawCard(ret);
-    ret.stage.operate = GAME_OPERATES.DISCARD;
+    endGame(ret);
     return ret;
 }
 
@@ -74,7 +65,7 @@ export function discardCard(game: IGame, card: ICard) {
 }
 
 export function drawCard(game: IGame): ICard {
-    let tmp: ICard = pickRandom(game.allCards);
+    let tmp: ICard = game.allCards.cards.shift();
     addCards(game.players[game.stage.playerIndex].hand!, [tmp]);
     return tmp;
 }
@@ -459,7 +450,6 @@ export function canPutCard(game: IGame, deck: IDeck, storedCards?: IDeck, additC
     }
     return false;
 }
-
 export function calcScore(game: IGame, player: IPlayer, can20?: boolean): number {
     let tmp = 0;
     player.hand!.cards.forEach((card) => {
@@ -517,15 +507,18 @@ export function applyCalc(game: IGame, calcInternalId: number, antiCalcInternalI
     }
     return finallyScore;
 }
-
-
 export function endGame(game: IGame) {
-    game.allCards = createDeck("allCards", getDeckAllCards());
+    game.allCards = createDeck("allCards", getDeckAllCards(true),true);
     game.allShown = createDeck("allShown", []);
     game.pinnedCard = [];
     game.lastOperate = "";
     game.lastDiscard = undefined;
     game.lastOperatedCards = createDeck("弃牌堆", [], true);
+    let hasher = createHash("sha256");
+    hasher.update(game.allCards.cards.map((card) => card.id +":"+ card.color).join("|"));
+    game.datas = {
+        deckHash: hasher.digest('hex')
+    }
     let maxScore = 0, maxScoreIdx = 0;
     game.players.forEach((player, idx) => {
         player.hand = createDeck("", []);
@@ -545,8 +538,6 @@ export function endGame(game: IGame) {
     game.stage.operate = GAME_OPERATES.DISCARD;
     game.stage.round = 0;
 }
-
-
 export function isCardPinned(game: IGame, card: ICard) {
     if (game.pinnedCard) {
         for (let c of game.pinnedCard) {

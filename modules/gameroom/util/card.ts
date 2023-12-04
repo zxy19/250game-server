@@ -10,7 +10,7 @@ export function _sort(deck: IDeck) {
  * 获取所有的卡
  * @returns 包含所有卡的数组
  */
-export function getDeckAllCards(): ICard[] {
+export function getDeckAllCards(suffer?: boolean): ICard[] {
   let res: ICard[] = [];
   CARDS.forEach((card) => {
     for (let i = 0; i < CARD_COUNT[card]; i++) {
@@ -21,6 +21,15 @@ export function getDeckAllCards(): ICard[] {
       res.push(tmp);
     }
   });
+  if (suffer) {
+    let newRes:ICard[] = [];
+    while(res.length > 0){
+      let idx = Math.floor(Math.random() * res.length);
+      newRes.push(res[idx]);
+      res.splice(idx, 1);
+    }
+    res = newRes;
+  }
   return res;
 }
 
