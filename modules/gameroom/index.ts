@@ -253,6 +253,7 @@ export default class Room {
         }
     }
     maskedSendPlayer(conId: number, msg: any) {
+        if (!msg.game) return this.sendPlayer(conId, msg);
         let tmpMsg = JSON.parse(JSON.stringify(msg));
         tmpMsg.game.allCards.cards = tmpMsg.game.allCards.cards.map((): ICard => ({ id: "JOK", color: 2 }))
         tmpMsg.game.players = tmpMsg.game.players.map((pt: IPlayer) => {
@@ -285,7 +286,7 @@ export default class Room {
     onCha(conId: number, data: Record<string, any>) {
         if (this.isPlayer(conId)) return;
         if (!this.game) return;
-        if(!this.game.players.find((p) => p.internalId == conId)) return;
+        if (!this.game.players.find((p) => p.internalId == conId)) return;
         if (this.game.stage.operate != GAME_OPERATES.WAIT_CHA) return;
         if (this.data.confirmedCha.find((data) => data.player == conId)) {
             return;
@@ -371,7 +372,7 @@ export default class Room {
     onPutCard(conId: number, data: Record<string, any>) {
         if (!this.game) return;
         if (!this.isPlayer(conId)) return;
-        if(!this.game.players.find((p) => p.internalId == conId)) return;
+        if (!this.game.players.find((p) => p.internalId == conId)) return;
         try {
             if (!data.putMethod) {
                 if (hasMultiPut(data.cards)) {
@@ -413,7 +414,7 @@ export default class Room {
     onPutCardSelect(conId: number, data: Record<string, any>) {
         if (!this.game) return;
         if (!this.isPlayer(conId)) return;
-        if(!this.game.players.find((p) => p.internalId == conId)) return;
+        if (!this.game.players.find((p) => p.internalId == conId)) return;
         if (!this.data.toPutPics) return;
         let cardGrp1: { select: ICard[], count: number } = this.data.toPutPics.shift();
         data.selection = data.selection.map(toCleanCard);
@@ -477,7 +478,7 @@ export default class Room {
     onDrawCard(conId: number, data: Record<string, any>) {
         if (!this.game) return;
         if (!this.isPlayer(conId)) return;
-        if(!this.game.players.find((p) => p.internalId == conId)) return;
+        if (!this.game.players.find((p) => p.internalId == conId)) return;
         if (this.game.stage.operate != GAME_OPERATES.PUTCARD && this.game.stage.operate != GAME_OPERATES.AFTER_CHA) return;
         if (this.game.allCards.cards.length == 0) {
             this.onNoCard();
@@ -508,7 +509,7 @@ export default class Room {
     onDiscardCard(conId: number, data: Record<string, any>) {
         if (!this.game) return;
         if (!this.isPlayer(conId)) return;
-        if(!this.game.players.find((p) => p.internalId == conId)) return;
+        if (!this.game.players.find((p) => p.internalId == conId)) return;
         if (this.game.stage.operate != GAME_OPERATES.DISCARD) return;
         try {
             data.card = toCleanCard(data.card);
@@ -534,7 +535,7 @@ export default class Room {
     onCalc(conId: number, data: Record<string, any>) {
         if (!this.game) return;
         if (!this.isPlayer(conId)) return;
-        if(!this.game.players.find((p) => p.internalId == conId)) return;
+        if (!this.game.players.find((p) => p.internalId == conId)) return;
         this.game.stage.operate = GAME_OPERATES.CALC;
         this.data.calcFrom = conId;
         this.data.confirmedAntiCalc = [];
@@ -553,7 +554,7 @@ export default class Room {
     onAntiCalc(conId: number, data: Record<string, any>) {
         if (this.isPlayer(conId)) return;
         if (!this.game) return;
-        if(!this.game.players.find((p) => p.internalId == conId)) return;
+        if (!this.game.players.find((p) => p.internalId == conId)) return;
         if (this.game.stage.operate != GAME_OPERATES.CALC) return;
         if (this.data.confirmedAntiCalc.find((data) => data.player == conId)) {
             return;
@@ -633,8 +634,9 @@ export default class Room {
             if (this.game.players.every((p) => p.ready)) {
                 this.onNextRound();
             }
-        } else {3
-            if(!this.player.find((p) => p.internalId == conId))
+        } else {
+            3
+            if (!this.player.find((p) => p.internalId == conId))
                 return;
             this.player.find((p) => p.internalId == conId).ready = !!(data.ready);
             this.send({

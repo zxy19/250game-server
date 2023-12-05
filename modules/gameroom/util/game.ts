@@ -171,7 +171,7 @@ function _isValidPut(game: IGame, cards: ICard[], c: Record<string, number>, jok
                 if (right >= CARDS.length - 2) throw new Error("摆牌非法");
                 right++;
                 targetCardId.push({ n: 1, c: CARDS[right], color: col });
-            } else if (jokerCnt - cnt == 0) {
+            } else if (jokerCnt - cnt == 1) {
                 let tc = [];
                 if (left != 0) tc.push(CARDS[left - 1]);
                 if (right != CARDS.length - 2) tc.push(CARDS[right + 1]);
